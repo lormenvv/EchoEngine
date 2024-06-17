@@ -125,6 +125,95 @@ int InitApplication(HINSTANCE hInstance, int cmdShow) {
     return 0;
 }
 
+DXGI_RATIONAL QueryRefreshRate(UINT screenWidth, UINT screenHeight, BOOL vsync)
+{
+    DXGI_RATIONAL refreshRate = { 0, 1 };
+    if (vsync)
+    {
+        IDXGIFactory* factory;
+        IDXGIAdapter* adapter;
+        IDXGIOutput* adapterOutput;
+        DXGI_MODE_DESC* displayModeList;
+
+        // Create a DirectX graphics interface factory.
+        HRESULT hr = CreateDXGIFactory(__uuidof(IDXGIFactory), (void**)&factory);
+        if (FAILED(hr))
+        {
+            MessageBox(0,
+                TEXT("Could not create DXGIFactory instance."),
+                TEXT("Query Refresh Rate"),
+                MB_OK);
+
+            throw new std::exception("Failed to create DXGIFactory.");
+        }
+
+        hr = factory->EnumAdapters(0, &adapter);
+        if (FAILED(hr))
+        {
+            MessageBox(0,
+                TEXT("Failed to enumerate adapters."),
+                TEXT("Query Refresh Rate"),
+                MB_OK);
+
+            throw new std::exception("Failed to enumerate adapters.");
+        }
+
+        hr = adapter->EnumOutputs(0, &adapterOutput);
+        if (FAILED(hr))
+        {
+            MessageBox(0,
+                TEXT("Failed to enumerate adapter outputs."),
+                TEXT("Query Refresh Rate"),
+                MB_OK);
+
+            throw new std::exception("Failed to enumerate adapter outputs.");
+        }
+
+        UINT numDisplayModes;
+        hr = adapterOutput->GetDisplayModeList(DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_ENUM_MODES_INTERLACED, &numDisplayModes, nullptr);
+        if (FAILED(hr))
+        {
+            MessageBox(0,
+                TEXT("Failed to query display mode list."),
+                TEXT("Query Refresh Rate"),
+                MB_OK);
+
+            throw new std::exception("Failed to query display mode list.");
+        }
+
+        displayModeList = new DXGI_MODE_DESC[numDisplayModes];
+        assert(displayModeList);
+
+        hr = adapterOutput->GetDisplayModeList(DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_ENUM_MODES_INTERLACED, &numDisplayModes, displayModeList);
+        if (FAILED(hr))
+        {
+            MessageBox(0,
+                TEXT("Failed to query display mode list."),
+                TEXT("Query Refresh Rate"),
+                MB_OK);
+
+            throw new std::exception("Failed to query display mode list.");
+        }
+
+        // Now store the refresh rate of the monitor that matches the width and height of the requested screen.
+        for (UINT i = 0; i < numDisplayModes; ++i)
+        {
+            if (displayModeList[i].Width == screenWidth && displayModeList[i].Height == screenHeight)
+            {
+                refreshRate = displayModeList[i].RefreshRate;
+            }
+        }
+
+        delete[] displayModeList;
+        SafeRelease(adapterOutput);
+        SafeRelease(adapter);
+        SafeRelease(factory);
+    }
+
+    return refreshRate;
+}
+
+
 LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) {
     PAINTSTRUCT paintStruct;
     HDC hDC;
@@ -197,4 +286,63 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE prevInstance, LPWSTR cmdLine,
     return returnCode;
 }
 
-//TODO: Initialize DirectX 11.
+//Initialize the DirectX device and swapchain.
+int InitDirectX(HINSTANCE hInstance, BOOL vSync) {
+    //A window handle must have been created already.
+    assert(g_WindowHandle != 0);
+
+    RECT clientRect;
+    GetClientRect(g_WindowHandle, &clientRect);
+
+    //Compute the exact client dimensions to be used to init the render targets for the swapchain.
+    unsigned int clientWidth = clientRect.right - clientRect.left;
+    unsigned int clientHeight = clientRect.bottom - clientRect.top;
+
+    DXGI_SWAP_CHAIN_DESC swapChainDesc;
+    ZeroMemory(&swapChainDesc, sizeof(DXGI_SWAP_CHAIN_DESC));
+
+    swapChainDesc.BufferCount = 1;
+    swapChainDesc.BufferDesc.Width = clientWidth;
+    swapChainDesc.BufferDesc.Height = clientHeight;
+    swapChainDesc.BufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    swapChainDesc.BufferDesc.RefreshRate = QueryRefreshRate(clientWidth, clientHeight, vSync);
+    swapChainDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+    swapChainDesc.OutputWindow = g_WindowHandle;
+    swapChainDesc.SampleDesc.Count = 1;
+    swapChainDesc.SampleDesc.Quality = 0;
+    swapChainDesc.SwapEffect = DXGI_SWAP_EFFECT_DISCARD;
+    swapChainDesc.Windowed = TRUE;
+
+    UINT createDeviceFlags = 0;
+#if _DEBUG
+    createDeviceFlags = D3D11_CREATE_DEVICE_DEBUG;
+#endif
+
+    D3D_FEATURE_LEVEL featureLevels[] = {
+        D3D_FEATURE_LEVEL_11_1,
+        D3D_FEATURE_LEVEL_11_0,
+        D3D_FEATURE_LEVEL_10_1,
+        D3D_FEATURE_LEVEL_10_0,
+        D3D_FEATURE_LEVEL_9_3,
+        D3D_FEATURE_LEVEL_9_2,
+        D3D_FEATURE_LEVEL_9_1
+    };
+
+    //This will be the feature level that's used to create our device and swapchain.
+    D3D_FEATURE_LEVEL featureLevel;
+
+    HRESULT hr = D3D11CreateDeviceAndSwapChain(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, createDeviceFlags, featureLevels, _countof(featureLevels), D3D11_SDK_VERSION, &swapChainDesc, &g_d3dSwapChain, &g_d3dDevice, &featureLevel, &g_d3dDeviceContext);
+
+    if (hr == E_INVALIDARG)
+    {
+        hr = D3D11CreateDeviceAndSwapChain(nullptr, D3D_DRIVER_TYPE_HARDWARE,
+            nullptr, createDeviceFlags, &featureLevels[1], _countof(featureLevels) - 1,
+            D3D11_SDK_VERSION, &swapChainDesc, &g_d3dSwapChain, &g_d3dDevice, &featureLevel,
+            &g_d3dDeviceContext);
+    }
+
+    if (FAILED(hr))
+    {
+        return -1;
+    }
+}
