@@ -16,6 +16,8 @@ ID3D11Device* g_d3dDevice = nullptr;
 ID3D11DeviceContext* g_d3dDeviceContext = nullptr;
 IDXGISwapChain* g_d3dSwapChain = nullptr;
 
+// Render target view for the back buffer of the swap chain.
+ID3D11RenderTargetView* g_d3dRenderTargetView = nullptr;
 // Depth/stencil view for use as a depth buffer.
 ID3D11DepthStencilView* g_d3dDepthStencilView = nullptr;
 // A texture to associate to the depth stencil view.
@@ -266,26 +268,6 @@ int Run() {
     return static_cast<int>(msg.wParam);
 }
 
-int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE prevInstance, LPWSTR cmdLine, int cmdShow) {
-    UNREFERENCED_PARAMETER(prevInstance);
-    UNREFERENCED_PARAMETER(cmdLine);
-
-    //Check for DirectX Math library support.
-
-    if (!XMVerifyCPUSupport()) {
-        MessageBox(nullptr, TEXT("Failed to verify DirectX Math library support."), TEXT("Error"), MB_OK);
-        return -1;
-    }
-    if (InitApplication(hInstance, cmdShow) != 0) {
-        MessageBox(nullptr, TEXT("Failed to create application window."), TEXT("Error"), MB_OK);
-        return -1;
-    }
-
-    int returnCode = Run();
-
-    return returnCode;
-}
-
 //Initialize the DirectX device and swapchain.
 int InitDirectX(HINSTANCE hInstance, BOOL vSync) {
     //A window handle must have been created already.
@@ -345,4 +327,119 @@ int InitDirectX(HINSTANCE hInstance, BOOL vSync) {
     {
         return -1;
     }
+
+    //Initialize the back buffer of the swap chain and associated render target view.
+    ID3D11Texture2D* backBuffer;
+    hr = g_d3dSwapChain->GetBuffer(0, __uuidof(ID3D11Texture2D), (LPVOID*)&backBuffer);
+    if (FAILED(hr)) {
+        return -1;
+    }
+    hr = g_d3dDevice->CreateRenderTargetView(backBuffer, nullptr, &g_d3dRenderTargetView);
+    if (FAILED(hr)) {
+        return -1;
+    }
+
+    SafeRelease(backBuffer);
+
+    // Create the depth buffer for use with the depth/stencil view.
+    D3D11_TEXTURE2D_DESC depthStencilBufferDesc;
+    ZeroMemory(&depthStencilBufferDesc, sizeof(D3D11_TEXTURE2D_DESC));
+
+    depthStencilBufferDesc.ArraySize = 1;
+    depthStencilBufferDesc.BindFlags = D3D11_BIND_DEPTH_STENCIL;
+    depthStencilBufferDesc.CPUAccessFlags = 0; // No CPU access required.
+    depthStencilBufferDesc.Format = DXGI_FORMAT_D24_UNORM_S8_UINT;
+    depthStencilBufferDesc.Width = clientWidth;
+    depthStencilBufferDesc.Height = clientHeight;
+    depthStencilBufferDesc.MipLevels = 1;
+    depthStencilBufferDesc.SampleDesc.Count = 1;
+    depthStencilBufferDesc.SampleDesc.Quality = 0;
+    depthStencilBufferDesc.Usage = D3D11_USAGE_DEFAULT;
+
+    hr = g_d3dDevice->CreateTexture2D(&depthStencilBufferDesc, nullptr, &g_d3dDepthStencilBuffer);
+    if (FAILED(hr))
+    {
+        return -1;
+    }
+
+    hr = g_d3dDevice->CreateDepthStencilView(g_d3dDepthStencilBuffer, nullptr, &g_d3dDepthStencilView);
+    if (FAILED(hr))
+    {
+        return -1;
+    }
+
+     // Setup depth/stencil state.
+    D3D11_DEPTH_STENCIL_DESC depthStencilStateDesc;
+    ZeroMemory( &depthStencilStateDesc, sizeof(D3D11_DEPTH_STENCIL_DESC) );
+ 
+    depthStencilStateDesc.DepthEnable = TRUE;
+    depthStencilStateDesc.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ALL;
+    depthStencilStateDesc.DepthFunc = D3D11_COMPARISON_LESS;
+    depthStencilStateDesc.StencilEnable = FALSE;
+ 
+    hr = g_d3dDevice->CreateDepthStencilState( &depthStencilStateDesc, &g_d3dDepthStencilState );
+
+
+    hr = g_d3dDevice->CreateDepthStencilView( g_d3dDepthStencilBuffer, nullptr, &g_d3dDepthStencilView );
+    if ( FAILED(hr) )
+    {
+        return -1;
+    }
+
+
+    // Setup rasterizer state.
+    D3D11_RASTERIZER_DESC rasterizerDesc;
+    ZeroMemory(&rasterizerDesc, sizeof(D3D11_RASTERIZER_DESC));
+
+    rasterizerDesc.AntialiasedLineEnable = FALSE;
+    rasterizerDesc.CullMode = D3D11_CULL_BACK;
+    rasterizerDesc.DepthBias = 0;
+    rasterizerDesc.DepthBiasClamp = 0.0f;
+    rasterizerDesc.DepthClipEnable = TRUE;
+    rasterizerDesc.FillMode = D3D11_FILL_SOLID;
+    rasterizerDesc.FrontCounterClockwise = FALSE;
+    rasterizerDesc.MultisampleEnable = FALSE;
+    rasterizerDesc.ScissorEnable = FALSE;
+    rasterizerDesc.SlopeScaledDepthBias = 0.0f;
+
+    // Create the rasterizer state object.
+    hr = g_d3dDevice->CreateRasterizerState(&rasterizerDesc, &g_d3dRasterizerState);
+    if (FAILED(hr))
+    {
+        return -1;
+    }
+
+    // Initialize the viewport to occupy the entire client area.
+    g_Viewport.Width = static_cast<float>(clientWidth);
+    g_Viewport.Height = static_cast<float>(clientHeight);
+    g_Viewport.TopLeftX = 0.0f;
+    g_Viewport.TopLeftY = 0.0f;
+    g_Viewport.MinDepth = 0.0f;
+    g_Viewport.MaxDepth = 1.0f;
+
+    return 0;
+}
+
+int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE prevInstance, LPWSTR cmdLine, int cmdShow) {
+    UNREFERENCED_PARAMETER(prevInstance);
+    UNREFERENCED_PARAMETER(cmdLine);
+
+    //Check for DirectX Math library support.
+
+    if (!XMVerifyCPUSupport()) {
+        MessageBox(nullptr, TEXT("Failed to verify DirectX Math library support."), TEXT("Error"), MB_OK);
+        return -1;
+    }
+    if (InitApplication(hInstance, cmdShow) != 0) {
+        MessageBox(nullptr, TEXT("Failed to create application window."), TEXT("Error"), MB_OK);
+        return -1;
+    }
+    if (InitDirectX(hInstance, g_EnableVSync) != 0) {
+        MessageBox(nullptr, TEXT("Failed to create DirectX device and swapchain."), TEXT("Error"), MB_OK);
+        return -1;
+    }
+
+    int returnCode = Run();
+
+    return returnCode;
 }
