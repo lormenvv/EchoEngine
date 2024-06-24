@@ -72,7 +72,7 @@ VertexPosColor g_Vertices[8] =
     { XMFLOAT3(1.0f, -1.0f,  1.0f), XMFLOAT3(1.0f, 0.0f, 1.0f) }  // 7
 };
 
-WORD g_Indicies[36] =
+WORD g_Indices[36] =
 {
     0, 1, 2, 0, 2, 3,
     4, 6, 5, 4, 7, 6,
@@ -420,6 +420,135 @@ int InitDirectX(HINSTANCE hInstance, BOOL vSync) {
     return 0;
 }
 
+bool LoadContent() {
+    //Shaders will be precompiled into the source code.
+    assert(g_d3dDevice);
+
+    //Create and initialize the vertex buffer.
+    D3D11_BUFFER_DESC vertexBufferDesc;
+    ZeroMemory(&vertexBufferDesc, sizeof(D3D11_BUFFER_DESC));
+
+    vertexBufferDesc.BindFlags = D3D11_BIND_VERTEX_BUFFER;
+    vertexBufferDesc.ByteWidth = sizeof(VertexPosColor) * _countof(g_Vertices);
+    vertexBufferDesc.CPUAccessFlags = 0;
+    vertexBufferDesc.Usage = D3D11_USAGE_DEFAULT;
+
+    D3D11_SUBRESOURCE_DATA resourceData;
+    ZeroMemory(&resourceData, sizeof(D3D11_SUBRESOURCE_DATA));
+
+    resourceData.pSysMem = g_Vertices;
+
+    HRESULT hr = g_d3dDevice->CreateBuffer(&vertexBufferDesc, &resourceData, &g_d3dVertexBuffer);
+    if (FAILED(hr)) {
+        return false;
+    }
+
+
+    //Create and initialize the index buffer.
+    D3D11_BUFFER_DESC indexBufferDesc;
+    ZeroMemory(&indexBufferDesc, sizeof(D3D11_BUFFER_DESC));
+
+    indexBufferDesc.BindFlags = D3D11_BIND_INDEX_BUFFER;
+    indexBufferDesc.ByteWidth = sizeof(WORD) * _countof(g_Indices);
+    indexBufferDesc.CPUAccessFlags = 0;
+    indexBufferDesc.Usage = D3D11_USAGE_DEFAULT;
+    resourceData.pSysMem = g_Indices;
+
+    hr = g_d3dDevice->CreateBuffer(&indexBufferDesc, &resourceData, &g_d3dIndexBuffer);
+    if (FAILED(hr)) {
+        return false;
+    }
+
+
+    //Create the constant buffers for the variables defined in the vertex shader.
+    D3D11_BUFFER_DESC constantBufferDesc;
+    ZeroMemory(&constantBufferDesc, sizeof(D3D11_BUFFER_DESC));
+
+    constantBufferDesc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+    constantBufferDesc.ByteWidth = sizeof(XMMATRIX);
+    constantBufferDesc.CPUAccessFlags = 0;
+    constantBufferDesc.Usage = D3D11_USAGE_DEFAULT;
+
+    hr = g_d3dDevice->CreateBuffer(&constantBufferDesc, nullptr, &g_d3dConstantBuffers[CB_Application]);
+    if (FAILED(hr)) {
+        return false;
+    }
+    hr = g_d3dDevice->CreateBuffer(&constantBufferDesc, nullptr, &g_d3dConstantBuffers[CB_Frame]);
+    if (FAILED(hr))
+    {
+        return false;
+    }
+    hr = g_d3dDevice->CreateBuffer(&constantBufferDesc, nullptr, &g_d3dConstantBuffers[CB_Object]);
+    if (FAILED(hr))
+    {
+        return false;
+    }
+
+    //Load the compiled vertex shader.
+    ID3DBlob* vertexShaderBlob;
+#if _DEBUG
+    LPCWSTR compiledVertexShaderObject = L"SimpleVertexShader_d.cso";
+#else
+    LPCWSTR compiledVertexShaderObject = L"SimpleVertexShader.cso";
+#endif
+
+    hr = D3DReadFileToBlob(compiledVertexShaderObject, &vertexShaderBlob);
+    if (FAILED(hr)) {
+        return false;
+    }
+
+    hr = g_d3dDevice->CreateVertexShader(vertexShaderBlob->GetBufferPointer(), vertexShaderBlob->GetBufferSize(), nullptr, &g_d3dVertexShader);
+    if (FAILED(hr)) {
+        return false;
+    }
+
+    //Create the input layout for the vertex shader.
+    D3D11_INPUT_ELEMENT_DESC vertexLayoutDesc[] = {
+        {"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, offsetof(VertexPosColor, Position), D3D11_INPUT_PER_VERTEX_DATA, 0},
+        {"COLOR", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, offsetof(VertexPosColor, Color), D3D11_INPUT_PER_VERTEX_DATA, 0}
+    };
+
+    hr = g_d3dDevice->CreateInputLayout(vertexLayoutDesc, _countof(vertexLayoutDesc), vertexShaderBlob->GetBufferPointer(), vertexShaderBlob->GetBufferSize(), &g_d3dInputLayout);
+    if (FAILED(hr)) {
+        return false;
+    }
+
+    SafeRelease(vertexShaderBlob);
+
+
+    //Load the compiled pixel shader.
+    ID3DBlob* pixelShaderBlob;
+
+#if _DEBUG
+    LPCWSTR compiledPixelShaderObject = L"SimplePixelShader_d.cso";
+#else
+    LPCWSTR compiledPixelShaderObject = L"SimplePixelShader.cso";
+#endif
+
+    hr = D3DReadFileToBlob(compiledPixelShaderObject, &pixelShaderBlob);
+    if (FAILED(hr)) {
+        return false;
+    }
+
+    hr = g_d3dDevice->CreatePixelShader(pixelShaderBlob->GetBufferPointer(), pixelShaderBlob->GetBufferSize(), nullptr, &g_d3dPixelShader);
+    if (FAILED(hr)) {
+        return false;
+    }
+
+    SafeRelease(pixelShaderBlob);
+
+    //Setup the projection matrix.
+    RECT clientRect;
+    GetClientRect(g_WindowHandle, &clientRect);
+
+    //Compute the exact client dimensions. This is required for a correct projection matrix.
+    float clientWidth = static_cast<float>(clientRect.right - clientRect.left);
+    float clientHeight = static_cast<float>(clientRect.bottom - clientRect.top);
+
+    g_ProjectionMatrix = XMMatrixPerspectiveFovLH(XMConvertToRadians(45.0f), clientWidth / clientHeight, 0.1f, 100.0f);
+    g_d3dDeviceContext->UpdateSubresource(g_d3dConstantBuffers[CB_Application], 0, nullptr, &g_ProjectionMatrix, 0, 0);
+}
+
 int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE prevInstance, LPWSTR cmdLine, int cmdShow) {
     UNREFERENCED_PARAMETER(prevInstance);
     UNREFERENCED_PARAMETER(cmdLine);
@@ -443,3 +572,5 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE prevInstance, LPWSTR cmdLine,
 
     return returnCode;
 }
+
+//TODO: Start work on "The Update Function".
