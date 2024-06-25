@@ -25,7 +25,7 @@ struct VertexShaderOutput
     float4 position : SV_POSITION;
 };
 
-VertexShaderOutput SinpleVertexShader(AppData IN)
+VertexShaderOutput SimpleVertexShader(AppData IN)
 {
     VertexShaderOutput OUT;
     

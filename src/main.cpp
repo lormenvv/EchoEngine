@@ -261,8 +261,8 @@ int Run() {
             the deltaTime value to explode.*/
             deltaTime = std::min<float>(deltaTime, maxTimeStep);
 
-            //Update(deltaTime);
-            //Render();
+            Update(deltaTime);
+            Render();
         }
     }
     return static_cast<int>(msg.wParam);
@@ -547,7 +547,99 @@ bool LoadContent() {
 
     g_ProjectionMatrix = XMMatrixPerspectiveFovLH(XMConvertToRadians(45.0f), clientWidth / clientHeight, 0.1f, 100.0f);
     g_d3dDeviceContext->UpdateSubresource(g_d3dConstantBuffers[CB_Application], 0, nullptr, &g_ProjectionMatrix, 0, 0);
+
+    return true;
 }
+
+void UnloadContent() {
+    SafeRelease(g_d3dConstantBuffers[CB_Application]);
+    SafeRelease(g_d3dConstantBuffers[CB_Frame]);
+    SafeRelease(g_d3dConstantBuffers[CB_Object]);
+    SafeRelease(g_d3dIndexBuffer);
+    SafeRelease(g_d3dVertexBuffer);
+    SafeRelease(g_d3dInputLayout);
+    SafeRelease(g_d3dVertexShader);
+    SafeRelease(g_d3dPixelShader);
+}
+
+//Clear the color and depth buffers.
+void Clear(const FLOAT clearColor[4], FLOAT clearDepth, UINT8 clearStencil) {
+    g_d3dDeviceContext->ClearRenderTargetView(g_d3dRenderTargetView, clearColor);
+    g_d3dDeviceContext->ClearDepthStencilView(g_d3dDepthStencilView, D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, clearDepth, clearStencil);
+}
+
+void Present(bool vSync) {
+    if (vSync) {
+        g_d3dSwapChain->Present(1, 0);
+    }
+    else {
+        g_d3dSwapChain->Present(0, 0);
+    }
+}
+
+void Update(float deltaTime) {
+    XMVECTOR eyePosition = XMVectorSet(0, 0, -10, 1);
+    XMVECTOR focusPoint = XMVectorSet(0, 0, 0, 1);
+    XMVECTOR upDirection = XMVectorSet(0, 1, 0, 0);
+    g_ViewMatrix = XMMatrixLookAtLH(eyePosition, focusPoint, upDirection);
+    g_d3dDeviceContext->UpdateSubresource(g_d3dConstantBuffers[CB_Frame], 0, nullptr, &g_ViewMatrix, 0, 0);
+
+    static float angle = 0.0f;
+    angle += 90.0f * deltaTime;
+    XMVECTOR rotationAxis = XMVectorSet(0, 1, 1, 0);
+
+    g_WorldMatrix = XMMatrixRotationAxis(rotationAxis, XMConvertToRadians(angle));
+    g_d3dDeviceContext->UpdateSubresource(g_d3dConstantBuffers[CB_Object], 0, nullptr, &g_WorldMatrix, 0, 0);
+}
+
+void Render() {
+    assert(g_d3dDevice);
+    assert(g_d3dDeviceContext);
+
+    //Clear the screen.
+    Clear(Colors::CornflowerBlue, 1.0f, 0);
+
+    //Set up the input assembler stage.
+    const UINT vertexStride = sizeof(VertexPosColor);
+    const UINT offset = 0;
+
+    g_d3dDeviceContext->IASetVertexBuffers(0, 1, &g_d3dVertexBuffer, &vertexStride, &offset);
+    g_d3dDeviceContext->IASetInputLayout(g_d3dInputLayout);
+    g_d3dDeviceContext->IASetIndexBuffer(g_d3dIndexBuffer, DXGI_FORMAT_R16_UINT, 0);
+    g_d3dDeviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+
+    //Set up the vertex shader stage.
+    g_d3dDeviceContext->VSSetShader(g_d3dVertexShader, nullptr, 0);
+    g_d3dDeviceContext->VSSetConstantBuffers(0, 3, g_d3dConstantBuffers);
+
+    //Set up the rasterizer stage.
+    g_d3dDeviceContext->RSSetState(g_d3dRasterizerState);
+    g_d3dDeviceContext->RSSetViewports(1, &g_Viewport);
+
+    //Set up the pixel shader stage.
+    g_d3dDeviceContext->PSSetShader(g_d3dPixelShader, nullptr, 0);
+
+    //Set up the output merger stage.
+    g_d3dDeviceContext->OMSetRenderTargets(1, &g_d3dRenderTargetView, g_d3dDepthStencilView);
+    g_d3dDeviceContext->OMSetDepthStencilState(g_d3dDepthStencilState, 1);
+
+    //Render the cube to the screen.
+    g_d3dDeviceContext->DrawIndexed(_countof(g_Indices), 0, 0);
+    Present(g_EnableVSync);
+}
+
+void Cleanup() {
+    SafeRelease(g_d3dDepthStencilView);
+    SafeRelease(g_d3dRenderTargetView);
+    SafeRelease(g_d3dDepthStencilBuffer);
+    SafeRelease(g_d3dDepthStencilState);
+    SafeRelease(g_d3dRasterizerState);
+    SafeRelease(g_d3dSwapChain);
+    SafeRelease(g_d3dDeviceContext);
+    SafeRelease(g_d3dDevice);
+}
+
+
 
 int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE prevInstance, LPWSTR cmdLine, int cmdShow) {
     UNREFERENCED_PARAMETER(prevInstance);
@@ -567,8 +659,14 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE prevInstance, LPWSTR cmdLine,
         MessageBox(nullptr, TEXT("Failed to create DirectX device and swapchain."), TEXT("Error"), MB_OK);
         return -1;
     }
+    if (!LoadContent()) {
+        MessageBox(nullptr, TEXT("Failed to load content."), TEXT("Error"), MB_OK);
+    }
 
     int returnCode = Run();
+
+    UnloadContent();
+    Cleanup();
 
     return returnCode;
 }
